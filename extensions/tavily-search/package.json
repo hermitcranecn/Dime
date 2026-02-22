@@ -1,0 +1,12 @@
+{
+  "name": "@openclaw/tavily-search",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OpenClaw Tavily search plugin",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

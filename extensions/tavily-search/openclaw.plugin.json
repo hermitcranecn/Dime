@@ -1,0 +1,16 @@
+{
+  "id": "tavily-search",
+  "name": "Tavily Search",
+  "description": "Search the web using Tavily's search API for up-to-date information.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "apiKey": {
+        "type": "string",
+        "description": "Tavily API key. Get one at https://tavily.com/"
+      }
+    },
+    "required": ["apiKey"]
+  }
+}
