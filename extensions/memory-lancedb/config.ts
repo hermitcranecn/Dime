@@ -5,10 +5,9 @@ import { join } from "node:path";
 export type MemoryConfig = {
   embedding: {
     provider: "openai";
-    model: string;
+    model?: string;
     apiKey: string;
     baseUrl?: string;
-    dimensions?: number;
   };
   dbPath?: string;
   autoCapture?: boolean;
@@ -53,6 +52,7 @@ const DEFAULT_DB_PATH = resolveDefaultDbPath();
 const EMBEDDING_DIMENSIONS: Record<string, number> = {
   "text-embedding-3-small": 1536,
   "text-embedding-3-large": 3072,
+  "nomic-embed-text": 768,
 };
 
 function assertAllowedKeys(value: Record<string, unknown>, allowed: string[], label: string) {
@@ -66,7 +66,8 @@ function assertAllowedKeys(value: Record<string, unknown>, allowed: string[], la
 export function vectorDimsForModel(model: string): number {
   const dims = EMBEDDING_DIMENSIONS[model];
   if (!dims) {
-    throw new Error(`Unsupported embedding model: ${model}`);
+    // Allow unknown models with default dimension
+    return 768;
   }
   return dims;
 }
@@ -83,10 +84,19 @@ function resolveEnvVars(value: string): string {
 
 function resolveEmbeddingModel(embedding: Record<string, unknown>): string {
   const model = typeof embedding.model === "string" ? embedding.model : DEFAULT_MODEL;
-  if (typeof embedding.dimensions !== "number") {
-    vectorDimsForModel(model);
-  }
+  vectorDimsForModel(model);
   return model;
+}
+
+function resolveEmbeddingBaseUrl(baseUrl: string): string {
+  // Resolve env vars in the baseUrl
+  return baseUrl.replace(/\$\{([^}]+)\}/g, (_, envVar) => {
+    const envValue = process.env[envVar];
+    if (!envValue) {
+      throw new Error(`Environment variable ${envVar} is not set`);
+    }
+    return envValue;
+  });
 }
 
 export const memoryConfigSchema = {
@@ -105,7 +115,7 @@ export const memoryConfigSchema = {
     if (!embedding || typeof embedding.apiKey !== "string") {
       throw new Error("embedding.apiKey is required");
     }
-    assertAllowedKeys(embedding, ["apiKey", "model", "baseUrl", "dimensions"], "embedding config");
+    assertAllowedKeys(embedding, ["apiKey", "model", "baseUrl"], "embedding config");
 
     const model = resolveEmbeddingModel(embedding);
 
@@ -123,9 +133,7 @@ export const memoryConfigSchema = {
         provider: "openai",
         model,
         apiKey: resolveEnvVars(embedding.apiKey),
-        baseUrl:
-          typeof embedding.baseUrl === "string" ? resolveEnvVars(embedding.baseUrl) : undefined,
-        dimensions: typeof embedding.dimensions === "number" ? embedding.dimensions : undefined,
+        baseUrl: typeof embedding.baseUrl === "string" ? resolveEmbeddingBaseUrl(embedding.baseUrl) : undefined,
       },
       dbPath: typeof cfg.dbPath === "string" ? cfg.dbPath : DEFAULT_DB_PATH,
       autoCapture: cfg.autoCapture === true,
@@ -139,18 +147,6 @@ export const memoryConfigSchema = {
       sensitive: true,
       placeholder: "sk-proj-...",
       help: "API key for OpenAI embeddings (or use ${OPENAI_API_KEY})",
-    },
-    "embedding.baseUrl": {
-      label: "Base URL",
-      placeholder: "https://api.openai.com/v1",
-      help: "Base URL for compatible providers (e.g. http://localhost:11434/v1)",
-      advanced: true,
-    },
-    "embedding.dimensions": {
-      label: "Dimensions",
-      placeholder: "1536",
-      help: "Vector dimensions for custom models (required for non-standard models)",
-      advanced: true,
     },
     "embedding.model": {
       label: "Embedding Model",

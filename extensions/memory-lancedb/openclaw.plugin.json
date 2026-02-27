@@ -5,25 +5,18 @@
     "embedding.apiKey": {
       "label": "OpenAI API Key",
       "sensitive": true,
-      "placeholder": "sk-proj-...",
+      "placeholder": "sk-proj-... or dummy for Ollama",
       "help": "API key for OpenAI embeddings (or use ${OPENAI_API_KEY})"
     },
     "embedding.model": {
       "label": "Embedding Model",
       "placeholder": "text-embedding-3-small",
-      "help": "OpenAI embedding model to use"
+      "help": "OpenAI embedding model to use (or nomic-embed-text for Ollama)"
     },
     "embedding.baseUrl": {
       "label": "Base URL",
-      "placeholder": "https://api.openai.com/v1",
-      "help": "Base URL for compatible providers (e.g. http://localhost:11434/v1)",
-      "advanced": true
-    },
-    "embedding.dimensions": {
-      "label": "Dimensions",
-      "placeholder": "1536",
-      "help": "Vector dimensions for custom models (required for non-standard models)",
-      "advanced": true
+      "placeholder": "http://localhost:11434",
+      "help": "Custom API base URL for Ollama (leave empty for OpenAI)"
     },
     "dbPath": {
       "label": "Database Path",
@@ -57,13 +50,12 @@
             "type": "string"
           },
           "model": {
-            "type": "string"
+            "type": "string",
+            "enum": ["text-embedding-3-small", "text-embedding-3-large", "nomic-embed-text"]
           },
           "baseUrl": {
-            "type": "string"
-          },
-          "dimensions": {
-            "type": "number"
+            "type": "string",
+            "description": "Custom API base URL (e.g., http://localhost:11434 for Ollama)"
           }
         },
         "required": ["apiKey"]
