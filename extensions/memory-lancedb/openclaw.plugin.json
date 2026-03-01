@@ -49,9 +49,22 @@
           "apiKey": {
             "type": "string"
           },
+          "provider": {
+            "type": "string",
+            "enum": ["openai", "ollama"],
+            "default": "openai"
+          },
           "model": {
             "type": "string",
-            "enum": ["text-embedding-3-small", "text-embedding-3-large", "nomic-embed-text"]
+            "enum": [
+              "text-embedding-3-small",
+              "text-embedding-3-large",
+              "nomic-embed-text",
+              "mxbai-embed-large",
+              "bge-m3",
+              "bge-large",
+              "bge-small"
+            ]
           },
           "baseUrl": {
             "type": "string",

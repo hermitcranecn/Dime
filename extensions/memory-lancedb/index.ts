@@ -11,6 +11,7 @@ import type * as LanceDB from "@lancedb/lancedb";
 import { Type } from "@sinclair/typebox";
 import OpenAI from "openai";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import type { MemoryConfig } from "./config.js";
 import {
   DEFAULT_CAPTURE_MAX_CHARS,
   MEMORY_CATEGORIES,
@@ -113,16 +114,23 @@ class MemoryDB {
     return fullEntry;
   }
 
-  async search(vector: number[], limit = 5, minScore = 0.5): Promise<MemorySearchResult[]> {
+  async search(vector: number[], limit = 5, minScore = 0.001): Promise<MemorySearchResult[]> {
     await this.ensureInitialized();
 
+    console.log(
+      `[DEBUG] Search: vector dim=${vector.length}, limit=${limit}, minScore=${minScore}`,
+    );
+
     const results = await this.table!.vectorSearch(vector).limit(limit).toArray();
+
+    console.log(`[DEBUG] Search results: ${results.length} raw results`);
 
     // LanceDB uses L2 distance by default; convert to similarity score
     const mapped = results.map((row) => {
       const distance = row._distance ?? 0;
       // Use inverse for a 0-1 range: sim = 1 / (1 + d)
       const score = 1 / (1 + distance);
+      console.log(`[DEBUG] Result: id=${row.id}, distance=${distance}, score=${score}`);
       return {
         entry: {
           id: row.id as string,
@@ -136,7 +144,10 @@ class MemoryDB {
       };
     });
 
-    return mapped.filter((r) => r.score >= minScore);
+    console.log(`[DEBUG] Filtering with minScore=${minScore}`);
+    const filtered = mapped.filter((r) => r.score >= minScore);
+    console.log(`[DEBUG] After filter: ${filtered.length} results`);
+    return filtered;
   }
 
   async delete(id: string): Promise<boolean> {
@@ -157,29 +168,56 @@ class MemoryDB {
 }
 
 // ============================================================================
-// OpenAI Embeddings
+// Embeddings (OpenAI / Ollama)
 // ============================================================================
 
 class Embeddings {
   private client: OpenAI;
+  private provider: "openai" | "ollama";
+  private baseUrl: string;
 
   constructor(
     apiKey: string,
     private model: string,
     baseUrl?: string,
+    provider: "openai" | "ollama" = "openai",
   ) {
-    this.client = new OpenAI({ 
-      apiKey,
-      baseUrl: baseUrl ? `${baseUrl}/v1` : undefined,
-    });
+    this.provider = provider;
+    this.baseUrl = baseUrl || "http://localhost:11434";
+
+    if (provider === "ollama") {
+      // Ollama doesn't need OpenAI client
+      this.client = new OpenAI({ apiKey: "dummy", baseUrl: undefined });
+    } else {
+      this.client = new OpenAI({
+        apiKey,
+        baseUrl: baseUrl ? `${baseUrl}/v1` : undefined,
+      });
+    }
   }
 
   async embed(text: string): Promise<number[]> {
-    const response = await this.client.embeddings.create({
-      model: this.model,
-      input: text,
-    });
-    return response.data[0].embedding;
+    if (this.provider === "ollama") {
+      // Use Ollama native API
+      const response = await fetch(`${this.baseUrl}/api/embeddings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: this.model, prompt: text }),
+      });
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Ollama embedding failed: ${error}`);
+      }
+      const data = (await response.json()) as { embedding: number[] };
+      return data.embedding;
+    } else {
+      // Use OpenAI API
+      const response = await this.client.embeddings.create({
+        model: this.model,
+        input: text,
+      });
+      return response.data[0].embedding;
+    }
   }
 }
 
@@ -197,6 +235,14 @@ const MEMORY_TRIGGERS = [
   /my\s+\w+\s+is|is\s+my/i,
   /i (like|prefer|hate|love|want|need)/i,
   /always|never|important/i,
+  // Chinese triggers
+  /记住|记一下|メモ| memor/i,
+  /关键|关键信息|关键点/,
+  /重要|非常重要|很重要/,
+  /必须|必须要|一定要/,
+  /主机厂|OEM|整车厂/,
+  /老板|董事长|总经理/,
+  /峰总|疯子/,
 ];
 
 const PROMPT_INJECTION_PATTERNS = [
@@ -299,7 +345,12 @@ const memoryPlugin = {
     const resolvedDbPath = api.resolvePath(cfg.dbPath!);
     const vectorDim = vectorDimsForModel(cfg.embedding.model ?? "text-embedding-3-small");
     const db = new MemoryDB(resolvedDbPath, vectorDim);
-    const embeddings = new Embeddings(cfg.embedding.apiKey, cfg.embedding.model!, cfg.embedding.baseUrl);
+    const embeddings = new Embeddings(
+      cfg.embedding.apiKey,
+      cfg.embedding.model!,
+      cfg.embedding.baseUrl,
+      cfg.embedding.provider,
+    );
 
     api.logger.info(`memory-lancedb: plugin registered (db: ${resolvedDbPath}, lazy init)`);
 
@@ -321,7 +372,7 @@ const memoryPlugin = {
           const { query, limit = 5 } = params as { query: string; limit?: number };
 
           const vector = await embeddings.embed(query);
-          const results = await db.search(vector, limit, 0.1);
+          const results = await db.search(vector, limit, 0.001);
 
           if (results.length === 0) {
             return {
@@ -440,7 +491,7 @@ const memoryPlugin = {
 
           if (query) {
             const vector = await embeddings.embed(query);
-            const results = await db.search(vector, 5, 0.7);
+            const results = await db.search(vector, 5, 0.001);
 
             if (results.length === 0) {
               return {
@@ -512,7 +563,7 @@ const memoryPlugin = {
           .option("--limit <n>", "Max results", "5")
           .action(async (query, opts) => {
             const vector = await embeddings.embed(query);
-            const results = await db.search(vector, parseInt(opts.limit), 0.3);
+            const results = await db.search(vector, parseInt(opts.limit), 0.001);
             // Strip vectors for output
             const output = results.map((r) => ({
               id: r.entry.id,
@@ -548,7 +599,7 @@ const memoryPlugin = {
 
         try {
           const vector = await embeddings.embed(event.prompt);
-          const results = await db.search(vector, 3, 0.3);
+          const results = await db.search(vector, 3, 0.001);
 
           if (results.length === 0) {
             return;

@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 export type MemoryConfig = {
   embedding: {
-    provider: "openai";
+    provider: "openai" | "ollama";
     model?: string;
     apiKey: string;
     baseUrl?: string;
@@ -53,6 +53,11 @@ const EMBEDDING_DIMENSIONS: Record<string, number> = {
   "text-embedding-3-small": 1536,
   "text-embedding-3-large": 3072,
   "nomic-embed-text": 768,
+  // Ollama models
+  "mxbai-embed-large": 1024,
+  "bge-m3": 1024,
+  "bge-large": 1024,
+  "bge-small": 384,
 };
 
 function assertAllowedKeys(value: Record<string, unknown>, allowed: string[], label: string) {
@@ -115,7 +120,16 @@ export const memoryConfigSchema = {
     if (!embedding || typeof embedding.apiKey !== "string") {
       throw new Error("embedding.apiKey is required");
     }
-    assertAllowedKeys(embedding, ["apiKey", "model", "baseUrl"], "embedding config");
+    assertAllowedKeys(embedding, ["apiKey", "model", "baseUrl", "provider"], "embedding config");
+
+    // Resolve provider (default to "openai")
+    const provider =
+      typeof embedding.provider === "string" && embedding.provider === "ollama"
+        ? ("ollama" as const)
+        : ("openai" as const);
+
+    // For Ollama, apiKey is optional (can be empty string)
+    const apiKey = provider === "ollama" ? "" : resolveEnvVars(embedding.apiKey);
 
     const model = resolveEmbeddingModel(embedding);
 
@@ -130,10 +144,13 @@ export const memoryConfigSchema = {
 
     return {
       embedding: {
-        provider: "openai",
+        provider,
         model,
-        apiKey: resolveEnvVars(embedding.apiKey),
-        baseUrl: typeof embedding.baseUrl === "string" ? resolveEmbeddingBaseUrl(embedding.baseUrl) : undefined,
+        apiKey,
+        baseUrl:
+          typeof embedding.baseUrl === "string"
+            ? resolveEmbeddingBaseUrl(embedding.baseUrl)
+            : undefined,
       },
       dbPath: typeof cfg.dbPath === "string" ? cfg.dbPath : DEFAULT_DB_PATH,
       autoCapture: cfg.autoCapture === true,
